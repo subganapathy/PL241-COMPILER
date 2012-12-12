@@ -41,6 +41,12 @@ public class cfg {
 			}
 		}
 		private void TraverseNode( CFGBlock node ){
+			if( node.BlockLabel().equals("main:24")){
+				for( CFGBlock succ : node.SuccessorList() ){
+					String blk = succ.BlockLabel();
+					boolean a= true;
+				}
+			}
 			if( mVisitedSet.contains( node ) ){
 				return;
 			}
@@ -63,6 +69,7 @@ public class cfg {
 			if( null != inorderSucc )
 				TraverseNode( inorderSucc );
 			//ArrayList< CFGBlock > succList = node.SuccessorList()
+			
 			if( mSortedList.isEmpty() ){
 				mSortedList.add( node );
 				//mPos.put( node, 0 );
@@ -628,6 +635,9 @@ public class cfg {
 				
 				Boolean isCurrentMoveInserted = false;
 				Integer insertLocation = (eachLocation - fromLocation - (NumberofPhiStatement()*2))/2 ;
+				if( insertLocation < 0 ){
+					insertLocation = 0;
+				}
 				ArrayList<CodeBlock> newMoveStatementInserted = new ArrayList<CodeBlock>();
 				for(String eachMoveFrom: moveInstAtCurrentPosition.keySet()){
 					isCurrentMoveInserted = false;
@@ -918,7 +928,7 @@ public class cfg {
 			if(NumberofPhiStatement() ==0){
 				return 0;
 			}
-			return (fromLocation + 2* (NumberofPhiStatement()-1));
+			return (fromLocation + 2* (NumberofPhiStatement()));
 		}
 		public FrameInfo getPhiFnOutputFrame(String var, CFGBlock predecessor){
 			FrameInfo returnValue = null;
@@ -1114,6 +1124,7 @@ public class cfg {
 				System.out.print( s  );
 			}
 		}
+		//private String cachedJmpLbl = null;
 		public String JumpLabel(){
 			if( 0 == statements.size() ) return null;
 			intermediateObjects.InterRep.CodeBlock cdBlk = statements.get( statements.size() - 1 );
@@ -1316,6 +1327,7 @@ public class cfg {
 			temp.add( -1 );
 			this.varDefined.put( varname, temp );
 		}
+		
 		public void AddStatement( CodeBlock cdBlk ){
 			cdBlk = cdBlk.Clone();
 			cdBlk.ProcessOperandsForMain();

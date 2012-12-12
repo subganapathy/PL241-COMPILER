@@ -467,6 +467,11 @@ public class OPT {
 				//	if( null == inherited ) continue;
 					InterRep.FrameInfo src  = inherited.outputTemporary;
 					InterRep.CodeBlock movStm = InterRep.CodeBlock.generateMoveOrStoreOP( src, fm, InterRep.CodeBlock.kMOVE );
+					if( movStm.label.equals("main:112") ){
+						boolean a = true;
+					}
+					InterRep.CodeBlock cdPrev = stmList.get( i );
+					movStm.label = new String( cdPrev.label );
 					stmList.set( i, movStm );
 					stmList.get( i ).ResetCache(); //really hacky but i am proud of it!!
 					this.SomethingChanged();

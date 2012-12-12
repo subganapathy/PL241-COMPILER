@@ -174,7 +174,35 @@ public class codegen {
 	}
 	private static ArrayList< HashMap< String, InterRep.FrameInfo > > mNestedArgList = new ArrayList< HashMap< String, InterRep.FrameInfo > >();
 	private static boolean clearTempsForCall = false;
-	//before u judge me for writing such a function it was written 1 day before the demo
+	
+	private static HashMap< String, ArrayList< String > > mArgsVector = new HashMap< String, ArrayList< String > >();
+	private static InterRep.FrameInfo fmGlbl = null;
+	private static void InsertFnArg( String funName, InterRep.FrameInfo srcArg, InterRep.FrameInfo dstArg, String passedLabel ){
+		if( InterRep.globalSymTab.isGlobalFun( funName ) ){
+			fmGlbl = srcArg;
+			return;
+		}
+		if( !mArgsVector.containsKey( funName ) ){
+			ArrayList< String > tmp = new ArrayList< String >();
+			mArgsVector.put( funName, tmp );
+		}
+		ArrayList< String > t = mArgsVector.get( funName );
+		int regIndex = 0;
+		if( srcArg instanceof InterRep.ConstFrameInfo ){
+			regIndex = codegen.mTempMgr.ReturnTemp( srcArg.tempID, passedLabel, false, false );
+			Integer value = Integer.valueOf( srcArg.tempID );
+			codegen.mCurGen.CreateArithmeticIns( passedLabel, InterRep.CodeBlock.kADD, codegen.ZERO, value, regIndex, true );
+		}
+		else{
+			regIndex = codegen.mArg.ReturnRegister( srcArg, passedLabel, false );
+		}
+		//odegen.mArg.ReturnRegister( srcArg, passedLabel, false );
+		codegen.curInfo.AddToSpillSlotWhileRunning( passedLabel, dstArg.tempID + "$" + dstArg.frameName, regIndex );
+		t.add( dstArg.tempID + "$" + dstArg.frameName );
+		mArgsVector.put( funName, t );
+	}
+	
+	
 	private static boolean IsRegSpillIns( InterRep.CodeBlock refIns ){
 		InterRep.FrameInfo srcParam = refIns.operands.get( 0 );
 		InterRep.FrameInfo dstParam = refIns.outputTemporary;
@@ -190,17 +218,39 @@ public class codegen {
 		}
 		return rgSrc.charAt( 0 ) == 'R' && rgDst.charAt( 0 ) == 'S';
 	}
+	
+	private static boolean IsReverseSpillIns( InterRep.CodeBlock refIns ){
+		InterRep.FrameInfo srcParam = refIns.operands.get( 0 );
+		InterRep.FrameInfo dstParam = refIns.outputTemporary;
+		String tempIDSrc = srcParam.tempID;
+		String tempIDDest = dstParam.tempID;
+		if( tempIDSrc.equals( tempIDDest ) == false ){
+			return false;
+		}
+		String rgSrc = srcParam.registerPosition;
+		String rgDst = dstParam.registerPosition;
+		if( null == rgSrc || null == rgDst || rgSrc.isEmpty() || rgDst.isEmpty() ){
+			return false;
+		}
+		return rgSrc.charAt( 0 ) == 'S' && rgDst.charAt( 0 ) == 'R';
+	}
 	public static void HandleMoveInstruction( String passedLabel, InterRep.CodeBlock refIns ){
 		InterRep.FrameInfo srcParam = refIns.operands.get( 0 );
 		InterRep.FrameInfo dstParam = refIns.outputTemporary;
 		int srcReg = 0;
 		//int srcReg = mArg.ReturnRegister( srcParam, passedLabel, false );
 		//case 1 return tmt
-		if( IsRegSpillIns( refIns ) ){
+		if( refIns.label.equals("main:309")){
+			boolean a = true;
+		}
+		/*if( IsRegSpillIns( refIns ) ){
 			//spill and free the register
 			codegen.mArg.SpillAndFreeReg(refIns, passedLabel);
 			return;
 		}
+		if( IsReverseSpillIns( refIns ) ){
+			return;
+		}*/
 		if( refIns.IsReturnOp() ){
 			int olSz = codegen.mCurGen.SizeOfIns();
 			int regIndex = codegen.mTempMgr.ReturnFromFun( codegen.mCurFn, passedLabel, false );
@@ -226,22 +276,27 @@ public class codegen {
 		}
 		//handle arg passing case.
 		if( refIns.isArgPassingStatement ){
-			if( codegen.isFnFirstArg( refIns.outputTemporary.tempID, refIns.outputTemporary.frameName ) ){
-				if( null != mArgsMap ){
-					codegen.mNestedArgList.add( mArgsMap );
-					mArgsMap = null;
+			if( false ){
+				if( codegen.isFnFirstArg( refIns.outputTemporary.tempID, refIns.outputTemporary.frameName ) ){
+					if( null != mArgsMap ){
+						codegen.mNestedArgList.add( mArgsMap );
+						mArgsMap = null;
+					}
 				}
+				if( null == mArgsMap ){
+					/*if( srcParam.tempID.contains("$RETURN" ) ){
+						int indx = srcParam.tempID.lastIndexOf( "$RETURN" );
+						String funName = srcParam.tempID.substring( 0, indx );
+					}*/
+					/*codegen.clearTempsForCall = true;
+					mArgsMap = codegen.mTempMgr.CallFun( refIns.outputTemporary.frameName, passedLabel );*/
+					mArgsMap = new HashMap< String, InterRep.FrameInfo >();
+				}
+				mArgsMap.put( refIns.outputTemporary.tempID, srcParam );
 			}
-			if( null == mArgsMap ){
-				/*if( srcParam.tempID.contains("$RETURN" ) ){
-					int indx = srcParam.tempID.lastIndexOf( "$RETURN" );
-					String funName = srcParam.tempID.substring( 0, indx );
-				}*/
-				/*codegen.clearTempsForCall = true;
-				mArgsMap = codegen.mTempMgr.CallFun( refIns.outputTemporary.frameName, passedLabel );*/
-				mArgsMap = new HashMap< String, InterRep.FrameInfo >();
+			else{
+				codegen.InsertFnArg( refIns.outputTemporary.frameName, srcParam, dstParam, passedLabel );
 			}
-			mArgsMap.put( refIns.outputTemporary.tempID, srcParam );
 		/*	int regIndex = mArgsMap.get( refIns.outputTemporary.tempID );
 			//codegen.mTempMgr.Dirty( regIndex );
 			if( !(srcParam instanceof InterRep.ConstFrameInfo )  ){
@@ -277,11 +332,12 @@ public class codegen {
 			codegen.mTempMgr.Dirty( srcReg );
 		}*/
 	//	codegen.HandleSpilledArg( srcReg, srcParam.tempID, passedLabel);
-		int destReg = mArg.ReturnRegister( dstParam, passedLabel, true );
+		int destReg = 0;
 		if( !(srcParam instanceof InterRep.ConstFrameInfo )  ){
 			srcReg = mArg.ReturnRegister( srcParam, passedLabel, false );
 			codegen.HandleSpilledArg( srcReg, srcParam.tempID, passedLabel );
 		}
+		 
 		/*else if( srcParam.tempID.contains("$RETURN") ){
 			int indx = srcParam.tempID.lastIndexOf( "$RETURN" );
 			String funName = srcParam.tempID.substring( 0, indx );
@@ -297,11 +353,12 @@ public class codegen {
 		else{
 		//	srcReg = codegen.mTempMgr.ReturnTemp( srcParam.tempID, passedLabel, false, false );
 			Integer value = Integer.valueOf( srcParam.tempID );
+			destReg = mArg.ReturnRegister( dstParam, passedLabel, true );
 			codegen.mCurGen.CreateArithmeticIns( passedLabel, InterRep.CodeBlock.kADD, codegen.ZERO, value, destReg, true );
 			return;
 		}
 		
-		
+		destReg = mArg.ReturnRegister( dstParam, passedLabel, true );
 		//the above does all the dirty mappings and allocates a temp.
 		
 		//now consider the minor case where in src is a temporary and destination is an arch register, we need to free up that temporary.
@@ -384,12 +441,65 @@ public class codegen {
 	}
 	private static void HandleFnArgs( String passedLabel, InterRep.CodeBlock refIns ){
 		String funName = refIns.jumpLabel;
-		InterRep.VarDecl varDecls = InterRep.globalSymTab.getVarDeclInfo( funName );
-		ArrayList< String > args = varDecls.mFormalsIdent;
-		if( null == mArgsMap || args == null || args.size() == 0 ) return;
-		for( String arg : args ){
+		if( false ){
+			InterRep.VarDecl varDecls = InterRep.globalSymTab.getVarDeclInfo( funName );
+			ArrayList< String > args = varDecls.mFormalsIdent;
+			if( null == mArgsMap || args == null || args.size() == 0 ) return;
+			for( String arg : args ){
+				InterRep.FrameInfo fm = mArgsMap.get( arg );
+				int regIndex = 0;
+				if( fm instanceof InterRep.ConstFrameInfo ){
+					regIndex = codegen.mTempMgr.ReturnTemp( fm.tempID, passedLabel, false, false );
+					Integer value = Integer.valueOf( fm.tempID );
+					codegen.mCurGen.CreateArithmeticIns( passedLabel, InterRep.CodeBlock.kADD, codegen.ZERO, value, regIndex, true );
+				}
+				else{
+					regIndex = codegen.mArg.ReturnRegister( fm, passedLabel, false );
+				}
+				codegen.mCurGen.StackOperations( passedLabel, regIndex, codegen.SP, codegen.WORDSIZE, true );
+				codegen.curInfo.IncrRunningBlock( codegen.WORDSIZE );
+			}
+		}
+		else{
+			ArrayList< String > fnVals = mArgsVector.get( funName );
+			if( null == fnVals ){
+				return;
+			}
+			
+			for( String arg : fnVals ){
+				int regIndex = codegen.mTempMgr.ReturnTemp( arg, passedLabel, false, false );
+				codegen.mCurGen.StackOperations( passedLabel, regIndex, codegen.SP, codegen.WORDSIZE, true );
+				codegen.curInfo.IncrRunningBlock( codegen.WORDSIZE );
+			}
+			mArgsVector.remove( funName );
+		}
+	}
+	
+	private static int ReturnRegForGlobalFun( String passedLabel, InterRep.CodeBlock refIns ){
+		if( null == fmGlbl ){
+			return 0;
+		}
+		int regIndex = 0;
+		if( null != fmGlbl ){
+			if( fmGlbl instanceof InterRep.ConstFrameInfo ){
+				regIndex = codegen.mTempMgr.ReturnTemp( fmGlbl.tempID, passedLabel, false, false );
+				Integer value = Integer.valueOf( fmGlbl.tempID );
+				codegen.mCurGen.CreateArithmeticIns( passedLabel, InterRep.CodeBlock.kADD, codegen.ZERO, value, regIndex, true );
+			}
+			else{
+				regIndex = codegen.mArg.ReturnRegister( fmGlbl, passedLabel, false );
+			}
+			return regIndex;
+		}
+		String funName = refIns.jumpLabel;
+		//int regIndex = 0;
+		if( false ){
+			InterRep.VarDecl varDecls = InterRep.globalSymTab.getVarDeclInfo( funName );
+			ArrayList< String > args = varDecls.mFormalsIdent;
+			if( null == mArgsMap && args.size() < 1 ) return 0;
+			String arg = args.get( 0 );
 			InterRep.FrameInfo fm = mArgsMap.get( arg );
-			int regIndex = 0;
+			
 			if( fm instanceof InterRep.ConstFrameInfo ){
 				regIndex = codegen.mTempMgr.ReturnTemp( fm.tempID, passedLabel, false, false );
 				Integer value = Integer.valueOf( fm.tempID );
@@ -398,27 +508,17 @@ public class codegen {
 			else{
 				regIndex = codegen.mArg.ReturnRegister( fm, passedLabel, false );
 			}
-			codegen.mCurGen.StackOperations( passedLabel, regIndex, codegen.SP, codegen.WORDSIZE, true );
-			codegen.curInfo.IncrRunningBlock( codegen.WORDSIZE );
-		}
-		
-	}
-	
-	private static int ReturnRegForGlobalFun( String passedLabel, InterRep.CodeBlock refIns ){
-		String funName = refIns.jumpLabel;
-		InterRep.VarDecl varDecls = InterRep.globalSymTab.getVarDeclInfo( funName );
-		ArrayList< String > args = varDecls.mFormalsIdent;
-		if( null == mArgsMap && args.size() < 1 ) return 0;
-		String arg = args.get( 0 );
-		InterRep.FrameInfo fm = mArgsMap.get( arg );
-		int regIndex = 0;
-		if( fm instanceof InterRep.ConstFrameInfo ){
-			regIndex = codegen.mTempMgr.ReturnTemp( fm.tempID, passedLabel, false, false );
-			Integer value = Integer.valueOf( fm.tempID );
-			codegen.mCurGen.CreateArithmeticIns( passedLabel, InterRep.CodeBlock.kADD, codegen.ZERO, value, regIndex, true );
 		}
 		else{
-			regIndex = codegen.mArg.ReturnRegister( fm, passedLabel, false );
+			ArrayList< String > t = mArgsVector.get( funName );
+			if( null == t || t.size() == 0 ){
+				return 0;
+			}
+			for( String arg : t ){
+				regIndex = codegen.mTempMgr.ReturnTemp( arg, passedLabel, false, false );
+				/*codegen.mCurGen.StackOperations( passedLabel, regIndex, codegen.SP, codegen.WORDSIZE, true );
+				codegen.curInfo.IncrRunningBlock( codegen.WORDSIZE );*/
+			}
 		}
 		
 		return regIndex;
@@ -449,10 +549,10 @@ public class codegen {
 			else{
 				codegen.clearTempsForCall = false;
 			}
-			if( codegen.mNestedArgList.size() > 0 ){
+			if( false && codegen.mNestedArgList.size() > 0 ){
 				codegen.mArgsMap = codegen.mNestedArgList.remove( codegen.mNestedArgList.size() - 1 );
 			}
-			else{
+			else if( false ){
 				codegen.mArgsMap = null;
 			}
 		}
@@ -901,6 +1001,20 @@ public class codegen {
 		return visitList;
 		
 	}
+	//private static ArrayList< String > fnWhiles = null;
+	private static boolean IsBlockChildAWhile( cfg.CFGBlock blk ){
+		ArrayList< String > fnWhiles = InterRep.globalSymTab.getWhileLabels( codegen.mCurFn );
+		if( null == fnWhiles ){
+			return false;
+		}
+		for ( cfg.CFGBlock succ : blk.SuccessorList() ){
+			String lbl = succ.BlockLabel();
+			if( fnWhiles.contains( lbl ) ){
+				return true;
+			}
+		}
+		return false;
+	}
 	private static void CompileCurrentFunction( String funName ){
 		//generate prolog.
 		codegen.curInfo.FunctionStarts();
@@ -920,14 +1034,21 @@ public class codegen {
 				if( blk.isDeleted ) continue;
 				boolean encounteredBr = false;
 				String blockLbl = blk.BlockLabel();
+				boolean didKill = false;
 				//firstTime = false;
 				for( InterRep.CodeBlock cdBlk : blk.GetStatementsList() ){
+					if(  blockLbl.equals("main:31")){
+						boolean t = true;
+					}
 					if( cdBlk.isDeleted ){
 						continue;
 					}
 				/*	if( null == blockLbl ){
 						blockLbl = cdBlk.label;
 					}*/
+					if( blockLbl.equals("printStuff:165") ){
+						boolean a = true;
+					}
 					switch( cdBlk.opCode ){
 					case InterRep.CodeBlock.kADD:
 					case InterRep.CodeBlock.kSUB:
@@ -952,8 +1073,13 @@ public class codegen {
 					case InterRep.CodeBlock.kBNE:
 					case InterRep.CodeBlock.kBRA:
 						if( !cdBlk.isCall  && !cdBlk.isReturn ){
-							encounteredBr = true;
+							
 							codegen.HandleKillSlots( blockLbl, funName, blk );
+							//didKill = true;
+						}
+						if( IsBlockChildAWhile( blk ) ){
+							codegen.mTempMgr.FreeAllTemps( blockLbl );
+							didKill = true;
 						}
 						String lbl = null;
 						if( encounteredBr ){
@@ -963,6 +1089,10 @@ public class codegen {
 							lbl = blockLbl;
 						}
 						codegen.HandleJmpInstructions( lbl, cdBlk );
+						if( !cdBlk.isCall && !cdBlk.isReturn ){
+							encounteredBr = true;
+						}
+						
 						default:
 							boolean a = true;
 					}
@@ -973,6 +1103,10 @@ public class codegen {
 			/*	if( !visitedSet.contains( blk ) ){
 					visitedSet.add( blk );
 				}*/
+				if( !didKill && IsBlockChildAWhile( blk ) ){
+					//codegen.HandleKillSlots( blockLbl, funName, blk );
+					codegen.mTempMgr.FreeAllTemps( lastLabel );
+				}
 			}			
 		if( mCurGen.EpilogDone() == false ){
 			mCurGen.CreateEpilog(lastLabel, codegen.writeDirtyGlobals );
@@ -1120,14 +1254,14 @@ public class codegen {
 			tempIns.add( ins );
 			String debugStr = GenerateDebug( "ADDI", codegen.SP, codegen.ZERO, 0 );
 			debugTempIns.add( debugStr );
-			while( val >= 0x7FF ){
+			while( val >= 32767 ){
 				++indx;
-				val = val - 0x7FF;
+				val = val - 32767;
 			}
 			for( int i = 0; i < indx; ++i ){
 				ins = GenerateF1( codegen.SP, codegen.SP, 0x7FF, kADD + kIOffset );
 				tempIns.add( ins );
-				debugStr = GenerateDebug( "ADDI", codegen.SP, codegen.SP, 0x7FF );
+				debugStr = GenerateDebug( "ADDI", codegen.SP, codegen.SP, 32767 );
 				debugTempIns.add( debugStr );
 			}
 			if( val > 0 ){
@@ -1354,6 +1488,9 @@ public class codegen {
 			this.mFuncInstructions.add( insOpCode );
 			this.mDebugInstructions.add( debugStr );
 			this.EnsureBranchResolved( label );
+			if( curLabel.equals("printStuff:183") ){
+				boolean a2 = true;
+			}
 			if( !this.mResolvedJumpIns.containsKey( curLabel ) && !refIns.isCall && !refIns.isReturn ){
 				this.mResolvedJumpIns.put( curLabel, mFuncInstructions.size() - 1 );
 			}
@@ -1372,6 +1509,9 @@ public class codegen {
 		public void CreateArithmeticIns( String label, int opCode, int srcRegIndex1, int srcRegIndex2, int destRegIndex, boolean isImmediate ){
 			//String label = refIns.label;
 			//this.EnsureBranchResolved( label );
+			if( mFuncInstructions.size() == 30 ){
+				boolean a = true;
+			}
 			int insOpCode = mArithmeticMap.get( opCode );
 			if( isImmediate ){
 				insOpCode += CodeGenerator.kIOffset;
@@ -1462,7 +1602,13 @@ public class codegen {
 					tgtIndex = this.mEpilogIndex;
 				}
 				else{
-					tgtIndex = mResolvedLabels.get( key );
+					if( mResolvedLabels.get( key ) != null ){
+						tgtIndex = mResolvedLabels.get( key );
+					}
+					else{
+						tgtIndex = this.mEpilogIndex;
+					}
+					
 				}
 					
 				for( String val : vals ){
@@ -1670,7 +1816,13 @@ public class codegen {
 				if( this.dirtyTemps.contains( retVal ) ){
 					this.dirtyTemps.remove( retVal );
 					String temp = mTempIDs.get( retVal - mStartIndex );
-					codegen.curInfo.AddToSpillSlotWhileRunning(label, temp, retVal );
+					if( !isGlobal ){
+						codegen.curInfo.AddToSpillSlotWhileRunning(label, temp, retVal );
+					}
+					else{
+						codegen.mainBlockInfo.AddToSpillSlotWhileRunning(label, temp, retVal );
+					}
+					
 				}
 				//mTempIDs.set( re, element)
 				String dummy = mTempIDs.get( retVal - mStartIndex );
@@ -1678,6 +1830,15 @@ public class codegen {
 				mTempIDs.set( retVal - mStartIndex, varname );
 				if( isOpTemp ){
 					this.Dirty( retVal );
+				}
+				else{
+					boolean a = true;
+					if( !isGlobal ){
+						a = codegen.curInfo.LoadFromSpillSlot(varname, retVal, label );
+					}
+					else if( isGlobal ){
+						a = codegen.mainBlockInfo.LoadFromSpillSlot(varname, retVal, label );
+					}
 				}
 			}
 			//the whole label business comes to picture when we kind of are gonna generate code, but that is later.
@@ -1831,7 +1992,7 @@ public class codegen {
 			mDirtySet.remove( regIndex );
 		}
 		public void UseRegister( int regIndex, String varname, String label, boolean isOpTemp ){
-			if( mArchRegisterSet.get( regIndex ) != null & varname.equals( this.mArchRegisterSet.get( regIndex ) ) ){
+			if( mArchRegisterSet.get( regIndex ) != null && varname.equals( this.mArchRegisterSet.get( regIndex ) ) ){
 				if( isOpTemp && !this.mDirtySet.contains( regIndex ) ){
 					mDirtySet.add( regIndex );
 				}

@@ -5,6 +5,16 @@ import registerAlloc.*;
 //Register Allocation
 import optimizer.OPT;
 import cfg.cfg.*;
+import GraphColoringUtils.graphColoringUtils.DefUseChain;
+import GraphColoringUtils.graphColoringUtils.SymbolLocationInfo;
+import GraphColoringUtils.graphColoringUtils.Pair;
+import GraphColoringUtils.graphColoringUtils.MIRToLIRConvertor;
+import GraphColoringUtils.graphColoringUtils.WebBuilder;
+import GraphColoringUtils.graphColoringUtils.WebRecord;
+import GraphColoringUtils.graphColoringUtils.AdjacencyMatrix;
+import GraphColoringUtils.graphColoringUtils.CoalesceSymbolicRegisters;
+import GraphColoringUtils.graphColoringUtils.InterferenceGraph;
+import GraphColoringUtils.graphColoringUtils.Pair;
 public   class InterRep {
 	public static enum BinaryOperations {
 	    MULTIPLY, DIVIDE, PLUS, MINUS 
@@ -217,9 +227,9 @@ public   class InterRep {
 			return fm;
 		}
 		
-		public FrameInfo getReturnValue( String funcName ) throws Exception {
+		public FrameInfo getReturnValue( String funcName ) {
 			if( !this.fnVarDecls.containsKey( funcName ) )
-				throw new Exception("Function activation record not found");
+				return null;
 			if( fnVarDecls.get( funcName ).mReturnInfo.tempID.isEmpty() )
 				fnVarDecls.get( funcName ).mReturnInfo = this.generateNewFrameInfo(funcName + "$RETURN");
 			return fnVarDecls.get( funcName ).mReturnInfo;
@@ -231,6 +241,7 @@ public   class InterRep {
 			
 			return fnVarDecls.get( funcName ).mReturnAddress;
 		}
+		
 		public FrameInfo generateConstantFrameInfo( Integer number ){
 			ConstFrameInfo locInfo = new ConstFrameInfo();
 			//locInfo.isTemporary = true;
@@ -260,9 +271,9 @@ public   class InterRep {
 			return locInfo;
 		}
 		
-		public ArrayList< FrameInfo > getFormalsInfo( String funcName ) throws Exception {
+		public ArrayList< FrameInfo > getFormalsInfo( String funcName ) {
 			if( !this.fnVarDecls.containsKey( funcName ) )
-				throw new Exception("Function activation record not found");
+				throw new Error("Function activation record not found");
 			
 			return fnVarDecls.get( funcName ).mFormalParamsInfo;
 		}
@@ -288,6 +299,7 @@ public   class InterRep {
 		public Boolean isLetMoveStatement = false;
 		public Boolean isGlobalAssignment = false;
 		public Boolean isArgPassingStatement = false;
+		public boolean isSpillIns = false;
 		public boolean somethingChanged = false; //java doesnt offer pass by ref
 		public Boolean isDeleted = false;
 		public ArrayList< CodeBlock > prologue = new ArrayList< CodeBlock > (); //phiblocks or prologue in case of func block
@@ -586,6 +598,7 @@ public   class InterRep {
 			cloned.fnIndex = this.fnIndex;
 			cloned.isReturn = this.isReturn;
 			cloned.isArgPassingStatement = this.isArgPassingStatement;
+			cloned.isSpillIns = this.isSpillIns;
 			cloned.isCall = this.isCall;
 			cloned.isDeleted = this.isDeleted;
 			cloned.isLetMoveStatement = this.isLetMoveStatement;
@@ -609,7 +622,12 @@ public   class InterRep {
 			for( FrameInfo fm : this.operands ){
 				cloned.operands.add( fm.Clone() );
 			}
-			cloned.outputTemporary = this.outputTemporary.Clone();
+			if (null != outputTemporary) {
+				cloned.outputTemporary = this.outputTemporary.Clone();
+			} else {
+				cloned.outputTemporary = null;
+			}
+			
 			return cloned;
 		}
 		public static final String[] translation = {
@@ -623,26 +641,31 @@ public   class InterRep {
 			if( cs.isDeleted )return s;
 			s += cs.label + " : ";
 			if( cs.isCall ){
-				s += " call " + cs.jumpLabel + "\n";;
-				return s;
-			}
-			if( cs.isReturn ){
+				s += " call " + cs.jumpLabel + "(";
+			} else if( cs.isReturn ){
 				s += " ret\n ";
 				return s;
+			} else {
+				s += translation[ cs.opCode ];
 			}
-			s += translation[ cs.opCode ];
 			int sz = cs.operands.size();
 			for( int i = 0; i < sz; ++ i ){
 				s += " ";
 				s += cs.operands.get( i ).serializeMe();
 				if( cs.opCode == kMOVE ) break;
+				if (cs.isCall && i + 1 < sz) {
+					s += ",";
+				}
+			}
+			if (cs.isCall) {
+				s += ")";
 			}
 			s += " ";
-			if( kBRA <= cs.opCode && cs.opCode <= kBGT ){
+			if( kBRA <= cs.opCode && cs.opCode <= kBGT  && !cs.isCall){
 				s += cs.jumpLabel;
 				s += " ";
 			}
-			if( kMOVE == cs.opCode || kPHI == cs.opCode || true ){
+			if (!cs.isCall && null != cs.outputTemporary) {
 				s += " ";
 				s += cs.outputTemporary.serializeMe();
 			}
@@ -837,15 +860,80 @@ public   class InterRep {
 					cfg.cfg.Dominator.DumpToVCG( fn + "CopyProp"  +  String.valueOf( counter ) + ".vcg" , paramBlock.root, 0, null );
 				}
 			}
-			
-			//Register Allocation
+			for( CFGBlock cfgb : paramBlock.vertex ){
+				String lbl = cfgb.BlockLabel();
+				if( lbl.equals( "main:112" ) ){
+					boolean a = true;
+				}
+			}
+			/*//Register Allocation
 			RegisterAllocator regAllocate = new RegisterAllocator();
 			regAllocate.BuildRegAllocUsingLinearScan(theRoot);
 			cfg.cfg.Dominator.DumpToVCG( fn + "AfterRegAlloc.vcg", theRoot, 0, null );
 			//fix for crash in test018.txt due to register allocator adding an extra instruction in the front of a cfg block
-		
+			for( CFGBlock cfgb : paramBlock.vertex ){
+				String lbl = cfgb.BlockLabel();
+				if( lbl.equals( "main:112" ) ){
+					boolean a = true;
+				}
+			}
 			//initialize codegen phase here 
-			codegen.PreProcess( fn, paramBlock );
+			codegen.PreProcess( fn, paramBlock );*/
+			boolean success = false;
+			List<CFGBlock> inputBlocks = paramBlock.vertex;
+			AdjacencyMatrix adjMatrix = null;
+			List<CFGBlock> coalescedLirBlocks = null;
+			boolean firstTime = true;
+			do {
+				success = false;
+				DefUseChain defUseChainBuilder = new DefUseChain();
+				final Map<Pair<String, SymbolLocationInfo>, ArrayList<SymbolLocationInfo>> duChain =
+					defUseChainBuilder.buildDefUseChain(inputBlocks);
+				
+				final WebBuilder buildWebs = new WebBuilder ();
+				final Set<WebRecord> webRecords = buildWebs.makeWeb(duChain);
+				
+				List<CFGBlock> lirBlocks = null;
+				final MIRToLIRConvertor lirConvertor = new MIRToLIRConvertor ();
+				
+				lirBlocks = lirConvertor.buildLIRFromMIR(inputBlocks, webRecords);
+				{
+					cfg.cfg.Dominator.DumpToVCG( fn + "LirCode"  +  ".vcg" , lirBlocks.get(0), 0, null );
+				}
+				final AdjacencyMatrix adjacentMatrix = new AdjacencyMatrix (lirBlocks);
+				adjacentMatrix.buildAdjacencyMatrix();
+				adjMatrix = adjacentMatrix;
+				final String output = adjacentMatrix.serializeGraphToString();
+				System.out.println(output);
+				
+				final CoalesceSymbolicRegisters registerCoalescer 
+				= new CoalesceSymbolicRegisters(adjacentMatrix, lirBlocks);
+				
+				Pair<List<CFGBlock>, Boolean> coalescedLirBlocksPair = registerCoalescer.coalesceRegisters();
+				coalescedLirBlocks = coalescedLirBlocksPair.getFirst();
+				{
+					cfg.cfg.Dominator.DumpToVCG( fn + "coalescedLirCode"  +  ".vcg" , coalescedLirBlocks.get(0), 0, null );
+				}
+				
+
+				
+				final InterferenceGraph interferenceGraph =
+					new InterferenceGraph (adjMatrix);
+				System.out.println (interferenceGraph.toString());
+				interferenceGraph.buildSpillCostFromCodeBlocks(coalescedLirBlocks);
+				interferenceGraph.pruneGraph();
+				success = interferenceGraph.assignRegisters();
+				if (success) {
+					coalescedLirBlocks = interferenceGraph.modifyCode(coalescedLirBlocks);
+				} else {
+					coalescedLirBlocks = interferenceGraph.genSpillCode(coalescedLirBlocks);
+				}
+				{
+					cfg.cfg.Dominator.DumpToVCG( fn + "registerAlloc"  +  ".vcg" , coalescedLirBlocks.get(0), 0, null );
+				}
+				inputBlocks = coalescedLirBlocks;
+			} while (!success);
+			
 			globalSymTab.ResetOptimizeScope();
 		}
 	}
@@ -1534,27 +1622,28 @@ public static class FunCallStm extends stm{
 	}
 	
 	private ArrayList< CodeBlock > mRetVal = new ArrayList< CodeBlock >();
+	/**
+	 * Process the arguments from right to left instead of from left to right #HPA project changes.
+	 */
 	public ArrayList< CodeBlock > returnIR() throws Exception {
 		//ArrayList< CodeBlock > retVal = new ArrayList< CodeBlock >();
 		if( mRetVal.size() > 0 )return mRetVal;
 		ArrayList< Expression > paramList = this.getMExpressionList();
+		final List<FrameInfo> formalParams = new ArrayList<FrameInfo>();
 		if( !paramList.isEmpty() ){
-			ArrayList< FrameInfo > formalInfo = globalSymTab.getFormalsInfo(  this.getMIdentifier() );
-			for( int i = 0; i < paramList.size(); ++i ){
-				FrameInfo x = formalInfo.get( i );
+			for( int i = paramList.size() - 1; i >= 0; --i ){
 				FrameInfo y = paramList.get( i ).returnOutputTemp();
 				ArrayList< CodeBlock > expCode = paramList.get( i ).returnIR();
 				mRetVal.addAll( expCode );
-				CodeBlock argBlock = CodeBlock.generateMoveOrStoreOP( y, x, CodeBlock.kMOVE );
-				argBlock.isArgPassingStatement = true;
-				mRetVal.add( argBlock  );
-				
+				formalParams.add(y);
 			}
+			Collections.reverse(formalParams);
 		}
 		CodeBlock unCond = CodeBlock.generateUnCondBranch();
 		unCond.jumpLabel = mIdentifier;
 		unCond.isCall = true;
 		unCond.fnIndex = this.mLocalNum;
+		unCond.operands.addAll(formalParams);
 		FrameInfo opTemp = globalSymTab.generateNewFrameInfo( unCond.label );
 		unCond.outputTemporary = opTemp;
 		mRetVal.add( unCond );
@@ -1581,6 +1670,7 @@ public static class FunCallStm extends stm{
 public static class FrameInfo{
 	public Integer framePtr = 0;
 	//public String objectIdentifier = new String();
+	public String symbolicRegisterName = null;
 	public String frameName = new String();
 	public Integer frameOffset = 0;
 	static final Integer frameWordSize = 4;
@@ -1642,6 +1732,16 @@ public static class FrameInfo{
 		cloned.tempID = new String( this.tempID );
 		if( null != this.ssaName )
 			cloned.ssaName = new String( this.ssaName );
+		if (null != this.symbolicRegisterName) {
+			cloned.symbolicRegisterName = new String (this.symbolicRegisterName);
+		} else {
+			cloned.symbolicRegisterName = null;
+		}
+		if (this.registerPosition != null) {
+			cloned.registerPosition = new String (this.registerPosition);
+		} else {
+			cloned.registerPosition = null;
+		}
 		
 		return cloned;
 	}
@@ -1727,6 +1827,7 @@ public static class LocationInfo extends FrameInfo {
 		if( null != this.ssaName )
 			cloned.ssaName = new String( this.ssaName );
 		cloned.isTemporary = this.isTemporary;
+		cloned.symbolicRegisterName = this.symbolicRegisterName;
 		return cloned;
 	}
 	public String returnLValueTemporary(){
@@ -1749,9 +1850,12 @@ public static class LocationInfo extends FrameInfo {
 	
 	public String serializeMe(){
 		if(registerPosition!=null) return registerPosition;
-		if( ssaName != null ) return ssaName;
-		return tempID;
+		if (symbolicRegisterName != null) {
+			return symbolicRegisterName;
+		}
+		return ((ssaName == null) ? tempID : ssaName);
 	}
+	
 	public String serializeRA(){
 		if( ssaName != null ) return ssaName;
 		return tempID;
@@ -1774,6 +1878,7 @@ public static class ConstFrameInfo extends FrameInfo{
 		if( null != this.ssaName )
 			cloned.ssaName = new String( this.ssaName );
 		cloned.constVal = this.constVal;
+		cloned.symbolicRegisterName = this.symbolicRegisterName;
 		return cloned;
 	}
 	public String returnRValueTemporary(){
@@ -2018,7 +2123,7 @@ public static class Computation{
 		*/
 		mRetVal.addAll( InterRep.BuildCodeBlock( mStmList ) );
 		gCodeTree.AddCodeBlock( "main", mRetVal );
-		codegen.Process();
+		//codegen.Process();
 		return mRetVal;
 		
 	}

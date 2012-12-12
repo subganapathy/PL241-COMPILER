@@ -892,9 +892,15 @@ public class RegisterAllocator{
 		if(registerFreeLocation[reg] == 0){
 			returnValue = false;
 		}else if(registerFreeLocation[reg] > currentInterval.GetLastRangeTo()){
+			if(registerFreeLocation[reg] != Integer.MAX_VALUE){
+				return false;
+			}
 			currentInterval.setRegisterAssigned(reg);
 			registerAssigned = true;
 		}else{
+			if(registerFreeLocation[reg] != Integer.MAX_VALUE){
+				return false;
+			}
 			currentInterval.SpiltAtOptimalPosition(registerFreeLocation[reg]);
 			currentInterval.setRegisterAssigned(reg);
 			registerAssigned = true;
@@ -1162,10 +1168,10 @@ public class RegisterAllocator{
 						}
 						
 						if(previousPos.compareTo(currentLoc)!=0 && previous != Integer.MIN_VALUE){
-							System.out.println("TYPE 3 "+liveInInterval.getVirtualRegister()+"--> Loc:"+eachRange.getFrom()+" From:"+previousPos+" To:"+currentLoc);
+							System.out.println("TYPE 3 "+liveInInterval.getVirtualRegister()+"--> Loc:"+previous+" From:"+previousPos+" To:"+currentLoc);
 							predecessorCB.AddMoveInstFromRegAlloc(previous, previousPos, currentLoc);
-							predecessorCB.putTempIdFix(previousPos, eachRange.getFrom(), sSAnameVsFrameInfo.get(liveInInterval.virtualRegister).tempID);
-							predecessorCB.putTempIdFix(currentLoc, eachRange.getFrom(), sSAnameVsFrameInfo.get(liveInInterval.virtualRegister).tempID);
+							predecessorCB.putTempIdFix(previousPos, previous, sSAnameVsFrameInfo.get(liveInInterval.virtualRegister).tempID);
+							predecessorCB.putTempIdFix(currentLoc, previous, sSAnameVsFrameInfo.get(liveInInterval.virtualRegister).tempID);
 						}
 						previous = current;
 						previousPos = currentLoc;

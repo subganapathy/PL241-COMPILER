@@ -23,7 +23,7 @@ public  class Regex {
 	private static Pattern sCallPattern = Pattern.compile( sCallChar );
 	private static Matcher sCallMatcher = sCallPattern.matcher("");
 	
-	public static String sInputFile =  "./testPrograms/cell.txt";
+	public static String sInputFile =  "./testProgs/test002.txt";
 	//parameter used by the file read below
 	private static String mFilename;
 	private static BufferedReader mReader;
